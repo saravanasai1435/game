@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>3D Infinite Car Game</title>
+<style>
+  body { margin: 0; overflow: hidden; background: #87ceeb; }
+  canvas { display: block; }
+</style>
+<script src="https://cdn.jsdelivr.net/npm/three@0.150.0/build/three.min.js"></script>
+</head>
+<body>
+<script>
+let scene, camera, renderer, car, arrow;
+let trees = [], buildings = [];
+const TREE_COUNT = 100;
+const BUILDING_COUNT = 30;
+let velocity = 0, accel = 30, maxSpeed = 80, turnRate = 1.8;
+let keys = { forward:false, back:false, left:false, right:false, boost:false };
+const worldRadius = 1000;
+
+init();
+animate();
+
+function init(){
+  scene = new THREE.Scene();
+
+  camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 5000);
+  camera.position.set(0, 8, -15);
+
+  renderer = new THREE.WebGLRenderer({antialias:true});
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  document.body.appendChild(renderer.domElement);
+
+  const hemiLight = new THREE.HemisphereLight(0xffffff, 0x444444, 1.0);
+  hemiLight.position.set(0, 200, 0);
+  scene.add(hemiLight);
+
+  const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
+  dirLight.position.set(100, 200, 100);
+  scene.add(dirLight);
+
+  // Ground
+  const groundTex = new THREE.TextureLoader().load('https://threejs.org/examples/textures/grasslight-big.jpg');
+  groundTex.wrapS = groundTex.wrapT = THREE.RepeatWrapping;
+  groundTex.repeat.set(100,100);
+  const groundMat = new THREE.MeshStandardMaterial({map: groundTex});
+  const ground = new THREE.Mesh(new THREE.PlaneGeometry(5000, 5000), groundMat);
+  ground.rotation.x = -Math.PI/2;
+  scene.add(ground);
+
+  // Car
+  const loader = new THREE.TextureLoader();
+  const carTex = loader.load('https://threejs.org/examples/textures/uv_grid_opengl.jpg');
+  const body = new THREE.Mesh(new THREE.BoxGeometry(4, 1.5, 6), new THREE.MeshStandardMaterial({map: carTex, metalness:0.3, roughness:0.5}));
+  const wheelGeo = new THREE.CylinderGeometry(1, 1, 0.5, 16);
+  const wheelMat = new THREE.MeshStandardMaterial({color:0x333333});
+  const wheels = [];
+  for(let i=0;i<4;i++){
+    const w = new THREE.Mesh(wheelGeo, wheelMat);
+    w.rotation.z = Math.PI/2;
+    wheels.push(w);
+  }
+  wheels[0].position.set(-2, -0.75, 2.5);
+  wheels[1].position.set( 2, -0.75, 2.5);
+  wheels[2].position.set(-2, -0.75, -2.5);
+  wheels[3].position.set( 2, -0.75, -2.5);
+
+  car = new THREE.Group();
+  car.add(body);
+  wheels.forEach(w => car.add(w));
+  scene.add(car);
+
+  // Arrow POV
+  arrow = new THREE.ArrowHelper(new THREE.Vector3(0,0,1), new THREE.Vector3(0,1.6,0), 5, 0xff0000);
+  car.add(arrow);
+
+  // Trees
+  const treeGeo = new THREE.ConeGeometry(5, 20, 8);
+  const treeMat = new THREE.MeshStandardMaterial({color:0x228B22});
+  for(let i=0;i<TREE_COUNT;i++){
+    const t = new THREE.Mesh(treeGeo, treeMat);
+    randomPositionAroundCar(t, 200, worldRadius);
+    scene.add(t);
+    trees.push(t);
+  }
+
+  // Buildings
+  for(let i=0;i<BUILDING_COUNT;i++){
+    const buildingGeo = new THREE.BoxGeometry(20, Math.random()*50+20, 20);
+    const buildingMat = new THREE.MeshStandardMaterial({color: 0x888888, roughness:0.8});
+    const b = new THREE.Mesh(buildingGeo, buildingMat);
+    randomPositionAroundCar(b, 300, worldRadius);
+    b.position.y = b.geometry.parameters.height/2;
+    scene.add(b);
+    buildings.push(b);
+  }
+
+  window.addEventListener('resize', onWindowResize);
+  window.addEventListener('keydown', e=>setKey(e.code,true));
+  window.addEventListener('keyup', e=>setKey(e.code,false));
+}
+
+function randomPositionAroundCar(obj, minDist, maxDist){
+  const angle = Math.random()*Math.PI*2;
+  const r = minDist + Math.random()*(maxDist-minDist);
+  obj.position.set(Math.cos(angle)*r, obj.geometry.parameters.height/2 || 10, Math.sin(angle)*r);
+}
+
+function recycleObjects(list){
+  const forward = new THREE.Vector3(0,0,1).applyQuaternion(car.quaternion).normalize();
+  for(const obj of list){
+    const dist = obj.position.distanceTo(car.position);
+    if(dist > worldRadius){
+      const aheadDist = 300 + Math.random()*600;
+      const sideOffset = (Math.random()-0.5)*500;
+      const pos = new THREE.Vector3().copy(car.position).addScaledVector(forward, aheadDist);
+      const perp = new THREE.Vector3(-forward.z,0,forward.x).multiplyScalar(sideOffset);
+      pos.add(perp);
+      obj.position.set(pos.x, obj.geometry.parameters.height/2 || 10, pos.z);
+    }
+  }
+}
+
+function setKey(code, val){
+  if(code==='KeyW' || code==='ArrowUp') keys.forward = val;
+  if(code==='KeyS' || code==='ArrowDown') keys.back = val;
+  if(code==='KeyA' || code==='ArrowLeft') keys.left = val;
+  if(code==='KeyD' || code==='ArrowRight') keys.right = val;
+  if(code==='ShiftLeft' || code==='ShiftRight') keys.boost = val;
+}
+
+function animate(){
+  requestAnimationFrame(animate);
+
+  const dt = 0.016;
+  if(keys.forward) velocity += accel * dt * (keys.boost?1.6:1);
+  else if(keys.back) velocity -= accel * 0.8 * dt;
+  else velocity *= Math.pow(0.9, dt*60);
+
+  velocity = Math.max(-maxSpeed*0.5, Math.min(maxSpeed, velocity));
+
+  const turnFactor = turnRate * (Math.abs(velocity) / maxSpeed + 0.2);
+  if(keys.left) car.rotation.y += (velocity>=0?1:-1) * turnFactor * dt;
+  if(keys.right) car.rotation.y -= (velocity>=0?1:-1) * turnFactor * dt;
+
+  const forward = new THREE.Vector3(0,0,1).applyQuaternion(car.quaternion).normalize();
+  car.position.addScaledVector(forward, velocity * dt);
+
+  recycleObjects(trees);
+  recycleObjects(buildings);
+
+  camera.position.copy(car.position).add(new THREE.Vector3(0,8,-15).applyQuaternion(car.quaternion));
+  camera.lookAt(car.position);
+
+  renderer.render(scene, camera);
+}
+
+function onWindowResize(){
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+}
+</script>
+</body>
+</html>
